@@ -1711,7 +1711,7 @@ static const ProtobufCFieldDescriptor update_add_htlc__field_descriptors[4] =
     "amount",
     2,
     PROTOBUF_C_LABEL_REQUIRED,
-    PROTOBUF_C_TYPE_INT32,
+    PROTOBUF_C_TYPE_UINT32,
     0,   /* quantifier_offset */
     offsetof(UpdateAddHtlc, amount),
     NULL,

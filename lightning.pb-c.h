@@ -278,7 +278,7 @@ struct  _UpdateAddHtlc
   /*
    * Amount for htlc
    */
-  int32_t amount;
+  uint32_t amount;
   /*
    * Hash for HTLC R value.
    */
