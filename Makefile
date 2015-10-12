@@ -175,7 +175,7 @@ PROGRAMS := $(TEST_CLI_PROGRAMS) $(TEST_PROGRAMS)
 
 CWARNFLAGS := -Werror -Wall -Wundef -Wmissing-prototypes -Wmissing-declarations -Wstrict-prototypes -Wold-style-definition
 CDEBUGFLAGS := -g -fstack-protector
-CFLAGS := $(CWARNFLAGS) $(CDEBUGFLAGS) -I $(CCANDIR) -I secp256k1/include/ -DVALGRIND_HEADERS=1 $(FEATURES)
+CFLAGS := $(CWARNFLAGS) $(CDEBUGFLAGS) -I $(CCANDIR) -I secp256k1/include/ -I . -DVALGRIND_HEADERS=1 $(FEATURES)
 
 LDLIBS := -lcrypto -lprotobuf-c
 $(PROGRAMS): CFLAGS+=-I.
