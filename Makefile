@@ -180,7 +180,7 @@ CFLAGS := $(CWARNFLAGS) $(CDEBUGFLAGS) -I $(CCANDIR) -I secp256k1/include/ -DVAL
 LDLIBS := -lcrypto -lprotobuf-c
 $(PROGRAMS): CFLAGS+=-I.
 
-default: $(PROGRAMS)
+default: $(PROGRAMS) daemon-all
 
 # Everything depends on the CCAN headers.
 $(CCAN_OBJS) $(CCAN_EXTRA_OBJS) $(CDUMP_OBJS) $(HELPER_OBJS) $(BITCOIN_OBJS) $(TEST_CLI_PROGRAMS:=.o) $(TEST_PROGRAMS:=.o): $(CCAN_HEADERS)
@@ -307,6 +307,8 @@ clean:
 	$(RM) $(PROGRAMS) test-cli/leak-anchor-sigs
 	$(RM) bitcoin/*.o *.o $(PROGRAMS:=.o) $(CCAN_OBJS) $(CCAN_EXTRA_OBJS)
 	$(RM) doc/deployable-lightning.{aux,bbl,blg,dvi,log,out,tex}
+
+include daemon/Makefile
 
 ccan-tal.o: $(CCANDIR)/ccan/tal/tal.c
 	$(CC) $(CFLAGS) -c -o $@ $<
