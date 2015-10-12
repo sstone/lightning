@@ -84,7 +84,8 @@ CCAN_OBJS :=					\
 	ccan-take.o				\
 	ccan-tal-grab_file.o			\
 	ccan-tal-str.o				\
-	ccan-tal.o
+	ccan-tal.o				\
+	ccan-time.o
 
 # For tests
 CCAN_EXTRA_OBJS :=				\
@@ -137,6 +138,7 @@ CCAN_HEADERS :=						\
 	$(CCANDIR)/ccan/tal/tal.h			\
 	$(CCANDIR)/ccan/tal/talloc/talloc.h		\
 	$(CCANDIR)/ccan/tcon/tcon.h			\
+	$(CCANDIR)/ccan/time/time.h			\
 	$(CCANDIR)/ccan/typesafe_cb/typesafe_cb.h
 
 TEST_CLI_HEADERS := test-cli/gather_updates.h
@@ -350,4 +352,6 @@ ccan-ilog.o: $(CCANDIR)/ccan/ilog/ilog.c
 ccan-isaac.o: $(CCANDIR)/ccan/isaac/isaac.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 ccan-isaac64.o: $(CCANDIR)/ccan/isaac/isaac64.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+ccan-time.o: $(CCANDIR)/ccan/time/time.c
 	$(CC) $(CFLAGS) -c -o $@ $<
