@@ -23,16 +23,13 @@ int main(int argc, char *argv[])
 	TCON_WRAP(struct container, int tc) iconw;
 	TCON_WRAP(struct container, int tc1; char *tc2) ciconw;
 
-	tcon_check(&icon, tc, 7)->raw.p = NULL;
-	tcon_check(&cicon, tc1, 7)->raw.p = argv[0];
-	tcon_check(&cicon, tc2, argv[0])->raw.p = argv[0];
+	BUILD_ASSERT(tcon_sizeof(&icon, tc) == sizeof(int));
+	BUILD_ASSERT(tcon_sizeof(&cicon, tc1) == sizeof(int));
+	BUILD_ASSERT(tcon_sizeof(&cicon, tc2) == sizeof(char *));
 
-	tcon_unwrap(tcon_check(&iconw, tc, 7))->p = NULL;
-	tcon_unwrap(tcon_check(&ciconw, tc1, 7))->p = argv[0];
-	tcon_unwrap(tcon_check(&ciconw, tc2, argv[0]))->p = argv[0];
-
-	BUILD_ASSERT(sizeof(iconw) == sizeof(struct container));
-	BUILD_ASSERT(sizeof(ciconw) == sizeof(struct container));
+	BUILD_ASSERT(tcon_sizeof(&iconw, tc) == sizeof(int));
+	BUILD_ASSERT(tcon_sizeof(&ciconw, tc1) == sizeof(int));
+	BUILD_ASSERT(tcon_sizeof(&ciconw, tc2) == sizeof(char *));
 
 	return 0;
 }
