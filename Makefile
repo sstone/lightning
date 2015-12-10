@@ -79,6 +79,7 @@ CCAN_OBJS :=					\
 	ccan-opt-parse.o			\
 	ccan-opt-usage.o			\
 	ccan-opt.o				\
+	ccan-pipecmd.o				\
 	ccan-read_write_all.o			\
 	ccan-str-hex.o				\
 	ccan-str.o				\
@@ -127,6 +128,7 @@ CCAN_HEADERS :=						\
 	$(CCANDIR)/ccan/opt/opt.h			\
 	$(CCANDIR)/ccan/opt/private.h			\
 	$(CCANDIR)/ccan/order/order.h			\
+	$(CCANDIR)/ccan/pipecmd/pipecmd.h		\
 	$(CCANDIR)/ccan/ptrint/ptrint.h			\
 	$(CCANDIR)/ccan/read_write_all/read_write_all.h	\
 	$(CCANDIR)/ccan/short_types/short_types.h	\
@@ -374,4 +376,6 @@ ccan-timer.o: $(CCANDIR)/ccan/timer/timer.c
 ccan-io-io.o: $(CCANDIR)/ccan/io/io.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 ccan-io-poll.o: $(CCANDIR)/ccan/io/poll.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+ccan-pipecmd.o: $(CCANDIR)/ccan/pipecmd/pipecmd.c
 	$(CC) $(CFLAGS) -c -o $@ $<
