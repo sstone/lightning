@@ -191,7 +191,7 @@ static void process_estimatefee(struct bitcoin_cli *bcli)
 
 	/* Don't know at 2?  Try 6... */
 	if (fee < 0) {
-		if (streq(bcli->args[3], "2")) {
+        if (streq(bcli->args[2], "2")) {
 			start_bitcoin_cli(bcli->dstate, process_estimatefee,
 					  false, bcli->cb, bcli->cb_arg,
 					  "estimatefee", "6", NULL);
@@ -203,7 +203,7 @@ static void process_estimatefee(struct bitcoin_cli *bcli)
 		fee_rate = bcli->dstate->config.closing_fee_rate;
 	} else {
 		/* If we used 6 as an estimate, double it. */
-		if (streq(bcli->args[3], "6"))
+        if (streq(bcli->args[2], "6"))
 			fee *= 2;
 		fee_rate = fee * 100000000;
 	}
