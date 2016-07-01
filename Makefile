@@ -43,7 +43,6 @@ CORE_SRC :=					\
 	close_tx.c				\
 	commit_tx.c				\
 	find_p2sh_out.c				\
-	funding.c				\
 	lightning.pb-c.c			\
 	opt_bits.c				\
 	permute_tx.c				\
@@ -58,8 +57,8 @@ CCAN_OBJS :=					\
 	ccan-crypto-sha256.o			\
 	ccan-crypto-shachain.o			\
 	ccan-asort.o				\
+	ccan-crypto-siphash24.o			\
 	ccan-err.o				\
-	ccan-hash.o				\
 	ccan-htable.o				\
 	ccan-ilog.o				\
 	ccan-io-io.o				\
@@ -99,9 +98,9 @@ CCAN_HEADERS :=						\
 	$(CCANDIR)/ccan/crypto/ripemd160/ripemd160.h	\
 	$(CCANDIR)/ccan/crypto/sha256/sha256.h		\
 	$(CCANDIR)/ccan/crypto/shachain/shachain.h	\
+	$(CCANDIR)/ccan/crypto/siphash24/siphash24.h	\
 	$(CCANDIR)/ccan/endian/endian.h			\
 	$(CCANDIR)/ccan/err/err.h			\
-	$(CCANDIR)/ccan/hash/hash.h			\
 	$(CCANDIR)/ccan/htable/htable.h			\
 	$(CCANDIR)/ccan/htable/htable_type.h		\
 	$(CCANDIR)/ccan/ilog/ilog.h			\
@@ -154,7 +153,6 @@ BITCOIN_HEADERS := bitcoin/address.h		\
 CORE_HEADERS := close_tx.h			\
 	commit_tx.h				\
 	find_p2sh_out.h				\
-	funding.h				\
 	names.h					\
 	opt_bits.h				\
 	overflows.h				\
@@ -261,7 +259,7 @@ check-source: check-makefile check-source-bolt		\
 full-check: check $(TEST_PROGRAMS) check-source
 
 TAGS: FORCE
-	$(RM) TAGS; find . -name '*.[ch]' | xargs etags --append
+	$(RM) TAGS; find * -name '*.[ch]' | xargs etags --append
 FORCE::
 
 ccan/ccan/cdump/tools/cdump-enumstr: ccan/ccan/cdump/tools/cdump-enumstr.o $(CDUMP_OBJS) $(CCAN_OBJS)
@@ -278,13 +276,13 @@ gen_pkt_names.h: lightning.pb-c.h ccan/ccan/cdump/tools/cdump-enumstr
 libsecp256k1.a: secp256k1/libsecp256k1.la
 
 secp256k1/libsecp256k1.la:
-	cd secp256k1 && ./autogen.sh && ./configure --enable-static=yes --enable-shared=no --enable-tests=no --enable-module-ecdh=yes --libdir=`pwd`/..
+	cd secp256k1 && ./autogen.sh && ./configure --enable-static=yes --enable-shared=no --enable-tests=no --enable-experimental=yes --enable-module-ecdh=yes --libdir=`pwd`/..
 	$(MAKE) -C secp256k1 install-exec
 
 lightning.pb-c.c lightning.pb-c.h: lightning.proto
 	$(PROTOCC) lightning.proto --c_out=.
 
-$(TEST_PROGRAMS): % : %.o $(BITCOIN_OBJS) $(CCAN_OBJS) version.o libsecp256k1.a
+$(TEST_PROGRAMS): % : %.o $(BITCOIN_OBJS) $(CCAN_OBJS) utils.o version.o libsecp256k1.a
 
 ccan/config.h: ccan/tools/configurator/configurator
 	if $< > $@.new; then mv $@.new $@; else rm $@.new; exit 1; fi
@@ -328,9 +326,17 @@ update-ccan:
 	echo CCAN version: `git -C ../ccan describe` >> ccan/README
 	$(RM) -r ccan.old
 
+update-secp256k1:
+	mv secp256k1 secp256k1.old
+	cp -a ../secp256k1 secp256k1
+	rm -rf secp256k1/.git
+	grep -v '^secp256k1 version:' secp256k1.old/README > secp256k1/README
+	echo secp256k1 version: `git -C ../secp256k1 describe 2>/dev/null || git -C ../secp256k1 show HEAD --format=%H` >> secp256k1/README
+	$(RM) -r secp256k1.old
+
 distclean: clean
 	$(MAKE) -C secp256k1/ distclean || true
-	$(RM) libsecp256k1.a
+	$(RM) libsecp256k1.a secp256k1/libsecp256k1.la
 
 maintainter-clean: distclean
 	@echo 'This command is intended for maintainers to use; it'
@@ -389,7 +395,7 @@ ccan-cdump.o: $(CCANDIR)/ccan/cdump/cdump.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 ccan-strmap.o: $(CCANDIR)/ccan/strmap/strmap.c
 	$(CC) $(CFLAGS) -c -o $@ $<
-ccan-hash.o: $(CCANDIR)/ccan/hash/hash.c
+ccan-crypto-siphash24.o: $(CCANDIR)/ccan/crypto/siphash24/siphash24.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 ccan-htable.o: $(CCANDIR)/ccan/htable/htable.c
 	$(CC) $(CFLAGS) -c -o $@ $<

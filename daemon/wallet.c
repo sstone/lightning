@@ -27,8 +27,7 @@ static void new_keypair(struct lightningd_state *dstate,
 	do {
 		if (RAND_bytes(privkey->secret, sizeof(privkey->secret)) != 1)
 			fatal("Could not get random bytes for privkey");
-	} while (!pubkey_from_privkey(dstate->secpctx,
-				      privkey, pubkey, SECP256K1_EC_COMPRESSED));
+	} while (!pubkey_from_privkey(dstate->secpctx, privkey, pubkey));
 }
 
 void wallet_add_signed_input(struct lightningd_state *dstate,
@@ -40,17 +39,18 @@ void wallet_add_signed_input(struct lightningd_state *dstate,
 	struct bitcoin_signature sig;
 	assert(input_num < tx->input_count);
 
-	redeemscript = bitcoin_redeem_p2wpkh(tx, &w->pubkey);
+	redeemscript = bitcoin_redeem_p2wpkh(tx, dstate->secpctx, &w->pubkey);
 
 	sig.stype = SIGHASH_ALL;
 	sign_tx_input(dstate->secpctx, tx, input_num,
 		      redeemscript, tal_count(redeemscript),
-		      p2wpkh_scriptcode(redeemscript, &w->pubkey),
+		      p2wpkh_scriptcode(redeemscript, dstate->secpctx,
+					&w->pubkey),
 		      &w->privkey,
 		      &w->pubkey,
 		      &sig.sig);
 
-	bitcoin_witness_p2sh_p2wpkh(tx->input,
+	bitcoin_witness_p2sh_p2wpkh(tx->input, dstate->secpctx,
 				    &tx->input[input_num],
 				    &sig,
 				    &w->pubkey);
@@ -83,7 +83,8 @@ static void json_newaddr(struct command *cmd,
 	struct sha256 h;
 
 	new_keypair(cmd->dstate, &w->privkey, &w->pubkey);
-	redeemscript = bitcoin_redeem_p2wpkh(cmd, &w->pubkey);
+	redeemscript = bitcoin_redeem_p2wpkh(cmd, cmd->dstate->secpctx,
+					     &w->pubkey);
 	sha256(&h, redeemscript, tal_count(redeemscript));
 	ripemd160(&w->p2sh, h.u.u8, sizeof(h));
 

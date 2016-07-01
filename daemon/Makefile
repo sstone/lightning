@@ -16,15 +16,20 @@ DAEMON_LIB_OBJS := $(DAEMON_LIB_SRC:.c=.o)
 DAEMON_SRC :=					\
 	daemon/bitcoind.c			\
 	daemon/chaintopology.c			\
+	daemon/channel.c			\
 	daemon/controlled_time.c		\
 	daemon/cryptopkt.c			\
 	daemon/dns.c				\
 	daemon/jsonrpc.c			\
 	daemon/lightningd.c			\
 	daemon/netaddr.c			\
+	daemon/onion.c				\
 	daemon/opt_time.c			\
-	daemon/peer.c				\
 	daemon/packets.c			\
+	daemon/pay.c				\
+	daemon/payment.c			\
+	daemon/peer.c				\
+	daemon/routing.c			\
 	daemon/secrets.c			\
 	daemon/timeout.c			\
 	daemon/wallet.c				\
@@ -43,18 +48,24 @@ DAEMON_JSMN_HEADERS := daemon/jsmn/jsmn.h
 DAEMON_HEADERS :=				\
 	daemon/bitcoind.h			\
 	daemon/chaintopology.h			\
+	daemon/channel.h			\
 	daemon/configdir.h			\
 	daemon/controlled_time.h		\
 	daemon/cryptopkt.h			\
 	daemon/dns.h				\
+	daemon/htlc.h				\
 	daemon/json.h				\
 	daemon/jsonrpc.h			\
 	daemon/lightningd.h			\
 	daemon/log.h				\
 	daemon/netaddr.h			\
+	daemon/onion.h				\
 	daemon/opt_time.h			\
+	daemon/pay.h				\
+	daemon/payment.h			\
 	daemon/peer.h				\
 	daemon/pseudorand.h			\
+	daemon/routing.h			\
 	daemon/secrets.h			\
 	daemon/timeout.h			\
 	daemon/wallet.h				\
@@ -71,7 +82,7 @@ check-daemon-makefile:
 	@if [ "`echo daemon/*.h`" != "$(DAEMON_HEADERS)" ]; then echo DAEMON_HEADERS incorrect; exit 1; fi
 
 # Git submodules are seriously broken.
-daemon/jsmn/jsmn.c:
+daemon/jsmn/jsmn.c daemon/jsmn/jsmn.h:
 	git submodule update daemon/jsmn/
 	[ -f $@ ] || git submodule update --init daemon/jsmn/
 

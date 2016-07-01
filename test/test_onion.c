@@ -1,7 +1,5 @@
 #define _GNU_SOURCE 1
 #include "onion_key.h"
-#include "secp256k1.h"
-#include "secp256k1_ecdh.h"
 #include "version.h"
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
@@ -20,6 +18,8 @@
 #include <ccan/read_write_all/read_write_all.h>
 #include <ccan/opt/opt.h>
 #include <ccan/str/hex/hex.h>
+#include <secp256k1.h>
+#include <secp256k1_ecdh.h>
 
 /* 
  * The client knows the server's public key S (which has corresponding
@@ -175,7 +175,7 @@ static void gen_keys(secp256k1_context *ctx,
 {
 	unsigned char tmp[33];
 	secp256k1_pubkey pkey;
-	size_t len;
+	size_t len = sizeof(tmp);
 
 	random_key(ctx, seckey, &pkey);
 
@@ -359,7 +359,7 @@ static void _dump_hex(unsigned char *x, size_t s) {
 
 static void dump_pkey(secp256k1_context *ctx, secp256k1_pubkey pkey) {
 	unsigned char tmp[65];
-	size_t len;
+	size_t len = sizeof(tmp);
 	secp256k1_ec_pubkey_serialize(ctx, tmp, &len, &pkey, 0);
 	dump_hex(tmp);
 }
@@ -596,7 +596,7 @@ static char *make_message(secp256k1_context *ctx,
 {
 	char *m;
 	unsigned char tmp[33];
-	size_t len;
+	size_t len = sizeof(tmp);
 	char hexstr[hex_str_size(20)];
 
 	secp256k1_ec_pubkey_serialize(ctx, tmp, &len, pubkey,

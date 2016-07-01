@@ -4,60 +4,66 @@
 #include "protobuf_convert.h"
 #include <ccan/crypto/sha256/sha256.h>
 
-Signature *signature_to_proto(const tal_t *ctx, const struct signature *sig)
+Signature *signature_to_proto(const tal_t *ctx,
+			      secp256k1_context *secpctx,
+			      const struct signature *sig)
 {
+	u8 compact[64];
 	Signature *pb = tal(ctx, Signature);
 	signature__init(pb);
 
-	assert(sig_valid(sig));
+	assert(sig_valid(secpctx, sig));
 
-	/* FIXME: Need a portable way to encode signatures in libsecp! */
-	
+	secp256k1_ecdsa_signature_serialize_compact(secpctx, compact, &sig->sig);
+
 	/* Kill me now... */
-	memcpy(&pb->r1, sig->sig.data, 8);
-	memcpy(&pb->r2, sig->sig.data + 8, 8);
-	memcpy(&pb->r3, sig->sig.data + 16, 8);
-	memcpy(&pb->r4, sig->sig.data + 24, 8);
-	memcpy(&pb->s1, sig->sig.data + 32, 8);
-	memcpy(&pb->s2, sig->sig.data + 40, 8);
-	memcpy(&pb->s3, sig->sig.data + 48, 8);
-	memcpy(&pb->s4, sig->sig.data + 56, 8);
+	memcpy(&pb->r1, compact, 8);
+	memcpy(&pb->r2, compact + 8, 8);
+	memcpy(&pb->r3, compact + 16, 8);
+	memcpy(&pb->r4, compact + 24, 8);
+	memcpy(&pb->s1, compact + 32, 8);
+	memcpy(&pb->s2, compact + 40, 8);
+	memcpy(&pb->s3, compact + 48, 8);
+	memcpy(&pb->s4, compact + 56, 8);
 	
 	return pb;
 }
 
-bool proto_to_signature(const Signature *pb, struct signature *sig)
+bool proto_to_signature(secp256k1_context *secpctx,
+			const Signature *pb,
+			struct signature *sig)
 {
-	/* Kill me again. */
-	/* FIXME: Need a portable way to encode signatures in libsecp! */
-	
-	memcpy(sig->sig.data, &pb->r1, 8);
-	memcpy(sig->sig.data + 8, &pb->r2, 8);
-	memcpy(sig->sig.data + 16, &pb->r3, 8);
-	memcpy(sig->sig.data + 24, &pb->r4, 8);
-	memcpy(sig->sig.data + 32, &pb->s1, 8);
-	memcpy(sig->sig.data + 40, &pb->s2, 8);
-	memcpy(sig->sig.data + 48, &pb->s3, 8);
-	memcpy(sig->sig.data + 56, &pb->s4, 8);
+	u8 compact[64];
 
-	return sig_valid(sig);
+ 	/* Kill me again. */
+	memcpy(compact, &pb->r1, 8);
+	memcpy(compact + 8, &pb->r2, 8);
+	memcpy(compact + 16, &pb->r3, 8);
+	memcpy(compact + 24, &pb->r4, 8);
+	memcpy(compact + 32, &pb->s1, 8);
+	memcpy(compact + 40, &pb->s2, 8);
+	memcpy(compact + 48, &pb->s3, 8);
+	memcpy(compact + 56, &pb->s4, 8);
+
+	if (secp256k1_ecdsa_signature_parse_compact(secpctx, &sig->sig, compact)
+	    != 1)
+		return false;
+
+	return sig_valid(secpctx, sig);
 }
 
-BitcoinPubkey *pubkey_to_proto(const tal_t *ctx, const struct pubkey *key)
+BitcoinPubkey *pubkey_to_proto(const tal_t *ctx,
+			       secp256k1_context *secpctx,
+			       const struct pubkey *key)
 {
 	BitcoinPubkey *p = tal(ctx, BitcoinPubkey);
-	struct pubkey check;
 
 	bitcoin_pubkey__init(p);
-	p->key.len = sizeof(key->der);
-	p->key.data = tal_dup_arr(p, u8, key->der, p->key.len, 0);
+	p->key.len = PUBKEY_DER_LEN;
+	p->key.data = tal_arr(p, u8, p->key.len);
 
-	{
-		secp256k1_context *secpctx = secp256k1_context_create(0);
-		assert(pubkey_from_der(secpctx, p->key.data, p->key.len, &check));
-		assert(pubkey_eq(&check, key));
-		secp256k1_context_destroy(secpctx);
-	}
+	pubkey_to_der(secpctx, p->key.data, key);
+
 	return p;
 }
 
@@ -88,6 +94,29 @@ void proto_to_sha256(const Sha256Hash *pb, struct sha256 *hash)
 	memcpy(hash->u.u8 + 16, &pb->c, 8);
 	memcpy(hash->u.u8 + 24, &pb->d, 8);
 }
+
+Rval *rval_to_proto(const tal_t *ctx, const struct rval *r)
+{
+	Rval *pb = tal(ctx, Rval);
+	rval__init(pb);
+
+	/* Kill me now... */
+	memcpy(&pb->a, r->r, 8);
+	memcpy(&pb->b, r->r + 8, 8);
+	memcpy(&pb->c, r->r + 16, 8);
+	memcpy(&pb->d, r->r + 24, 8);
+	return pb;
+}
+
+void proto_to_rval(const Rval *pb, struct rval *r)
+{
+	/* Kill me again. */
+	memcpy(r->r, &pb->a, 8);
+	memcpy(r->r + 8, &pb->b, 8);
+	memcpy(r->r + 16, &pb->c, 8);
+	memcpy(r->r + 24, &pb->d, 8);
+}
+
 
 bool proto_to_rel_locktime(const Locktime *l, struct rel_locktime *locktime)
 {

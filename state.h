@@ -79,65 +79,31 @@ static inline bool input_is_pkt(enum state_input input)
 	return input <= PKT_ERROR;
 }
 
-union input {
-	Pkt *pkt;
-	struct command *cmd;
-	struct bitcoin_tx *tx;
-	struct htlc_progress *htlc_prog;
-	struct commit_info *ci;
-	struct htlc_onchain {
-		/* Which commitment we using. */
-		struct commit_info *ci;
-		/* Which HTLC. */
-		size_t i;
-		/* The rvalue (or NULL). */
-		u8 *r;
-	} *htlc_onchain;
-};
-
 enum state state(struct peer *peer,
 		 const enum state_input input,
-		 const union input *idata,
+		 const Pkt *pkt,
 		 const struct bitcoin_tx **broadcast);
 
-/* Any CMD_SEND_HTLC_* */
-#define CMD_SEND_UPDATE_ANY INPUT_MAX
-
-/* a == b?  (or one of several for CMD_SEND_UPDATE_ANY) */
+/* a == b? */
 static inline bool input_is(enum state_input a, enum state_input b)
 {
-	if (b == CMD_SEND_UPDATE_ANY) {
-		/* Single | here, we want to record all. */
-		return input_is(a, CMD_SEND_HTLC_ADD)
-			| input_is(a, CMD_SEND_HTLC_FULFILL)
-			| input_is(a, CMD_SEND_HTLC_FAIL);
-	}
-
-/* For test_state_coverate to make the states. */
-#ifdef MAPPING_INPUTS
-	MAPPING_INPUTS(b);
-#endif
 	return a == b;
 }
 
-struct signature;
+struct rval;
 
 /* Inform peer have an unexpected packet. */
 void peer_unexpected_pkt(struct peer *peer, const Pkt *pkt);
-
-/* An on-chain transaction revealed an R value. */
-void peer_tx_revealed_r_value(struct peer *peer,
-			      const struct htlc_onchain *htlc_onchain);
 
 /* Send various kinds of packets */
 void queue_pkt_open(struct peer *peer, OpenChannel__AnchorOffer anchor);
 void queue_pkt_anchor(struct peer *peer);
 void queue_pkt_open_commit_sig(struct peer *peer);
 void queue_pkt_open_complete(struct peer *peer);
-void queue_pkt_htlc_add(struct peer *peer,
-			const struct htlc_progress *htlc_prog);
-void queue_pkt_htlc_fulfill(struct peer *peer, u64 id, const struct sha256 *r);
-void queue_pkt_htlc_fail(struct peer *peer, u64 id);
+void queue_pkt_htlc_add(struct peer *peer, struct htlc *htlc);
+void queue_pkt_htlc_fulfill(struct peer *peer, struct htlc *htlc,
+			    const struct rval *r);
+void queue_pkt_htlc_fail(struct peer *peer, struct htlc *htlc);
 void queue_pkt_commit(struct peer *peer);
 void queue_pkt_revocation(struct peer *peer);
 void queue_pkt_close_clearing(struct peer *peer);

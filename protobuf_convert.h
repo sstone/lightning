@@ -2,18 +2,24 @@
 #define LIGHTNING_PROTOBUF_CONVERT_H
 #include "config.h"
 #include "lightning.pb-c.h"
-#include "secp256k1.h"
 #include <ccan/tal/tal.h>
+#include <secp256k1.h>
 #include <stdbool.h>
 
 /* Convert to-from protobuf to internal representation. */
 struct signature;
-Signature *signature_to_proto(const tal_t *ctx, const struct signature *sig);
-bool proto_to_signature(const Signature *pb, struct signature *sig);
+Signature *signature_to_proto(const tal_t *ctx,
+			      secp256k1_context *secpctx,
+			      const struct signature *sig);
+bool proto_to_signature(secp256k1_context *secpctx,
+			const Signature *pb,
+			struct signature *sig);
 
 /* Convert to-from protobuf to internal representation. */
 struct pubkey;
-BitcoinPubkey *pubkey_to_proto(const tal_t *ctx, const struct pubkey *key);
+BitcoinPubkey *pubkey_to_proto(const tal_t *ctx,
+			       secp256k1_context *secpctx,
+			       const struct pubkey *key);
 bool proto_to_pubkey(secp256k1_context *secpctx,
 		     const BitcoinPubkey *pb, struct pubkey *key);
 
@@ -21,6 +27,12 @@ bool proto_to_pubkey(secp256k1_context *secpctx,
 struct sha256;
 Sha256Hash *sha256_to_proto(const tal_t *ctx, const struct sha256 *hash);
 void proto_to_sha256(const Sha256Hash *pb, struct sha256 *hash);
+
+struct rval {
+	u8 r[32];
+};
+Rval *rval_to_proto(const tal_t *ctx, const struct rval *r);
+void proto_to_rval(const Rval *pb, struct rval *r);
 
 struct rel_locktime;
 struct abs_locktime;

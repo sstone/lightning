@@ -6,9 +6,11 @@
 #include "bitcoin/pubkey.h"
 #include "bitcoin/script.h"
 #include "bitcoin/shadouble.h"
-#include "funding.h"
+#include "channel.h"
+#include "htlc.h"
 #include "lightning.pb-c.h"
 #include "netaddr.h"
+#include "protobuf_convert.h"
 #include "state.h"
 #include <ccan/crypto/sha256/sha256.h>
 #include <ccan/crypto/shachain/shachain.h>
@@ -23,18 +25,18 @@ enum htlc_stage_type {
 
 struct htlc_add {
 	enum htlc_stage_type add;
-	struct channel_htlc htlc;
+	struct htlc *htlc;
 };
 
 struct htlc_fulfill {
 	enum htlc_stage_type fulfill;
-	u64 id;
-	struct sha256 r;
+	struct htlc *htlc;
+	struct rval r;
 };
 
 struct htlc_fail {
 	enum htlc_stage_type fail;
-	u64 id;
+	struct htlc *htlc;
 };
 
 union htlc_staging {
@@ -72,6 +74,8 @@ struct commit_info {
 	struct sha256 *revocation_preimage;
 	/* unacked changes (already applied to staging_cstate) */
 	union htlc_staging *unacked_changes;
+	/* acked changes (already applied to staging_cstate) */
+	union htlc_staging *acked_changes;
 };
 
 struct peer_visible_state {
@@ -79,7 +83,7 @@ struct peer_visible_state {
 	enum state_input offer_anchor;
 	/* Key for commitment tx inputs, then key for commitment tx outputs */
 	struct pubkey commitkey, finalkey;
-	/* How long to they want the other's outputs locked (seconds) */
+	/* How long to they want the other's outputs locked (blocks) */
 	struct rel_locktime locktime;
 	/* Minimum depth of anchor before channel usable. */
 	unsigned int mindepth;
@@ -92,17 +96,9 @@ struct peer_visible_state {
 
 	/* cstate to generate next commitment tx. */
 	struct channel_state *staging_cstate;
-};
 
-struct htlc_progress {
-	/* The HTLC we're working on. */
-	union htlc_staging stage;
-};
-
-struct out_pkt {
-	Pkt *pkt;
-	void (*ack_cb)(struct peer *peer, void *arg);
-	void *ack_arg;
+	/* HTLCs offered by this side */
+	struct htlc_map htlcs;
 };
 
 /* Off peer->outgoing_txs */
@@ -125,6 +121,9 @@ struct peer {
 	/* If we're doing a commit, this is the command which triggered it */
 	struct command *commit_jsoncmd;
 
+	/* Any outstanding "pay" commands. */
+	struct list_head pay_commands;
+	
 	/* Global state. */
 	struct lightningd_state *dstate;
 
@@ -132,7 +131,7 @@ struct peer {
 	struct netaddr addr;
 
 	/* Their ID. */
-	struct pubkey id;
+	struct pubkey *id;
 
 	/* Current received packet. */
 	Pkt *inpkt;
@@ -185,9 +184,6 @@ struct peer {
 		const struct bitcoin_tx **resolved;
 	} closing_onchain;
 	
-	/* If not INPUT_NONE, send this when we have no more HTLCs. */
-	enum state_input cleared;
-
 	/* Current ongoing packetflow */
 	struct io_data *io_data;
 	
@@ -200,15 +196,15 @@ struct peer {
 	/* Bitcoin transctions we're broadcasting (see chaintopology.c) */
 	struct list_head outgoing_txs;
 	
-	/* Timeout for close_watch. */
-	struct oneshot *close_watch_timeout;
-
 	/* Timeout for collecting changes before sending commit. */
 	struct oneshot *commit_timer;
 	
 	/* Private keys for dealing with this peer. */
 	struct peer_secrets *secrets;
 
+	/* Our route connection to peer: NULL until we are in normal mode. */
+	struct node_connection *nc;
+	
 	/* For testing. */
 	bool fake_close;
 	bool output_enabled;
@@ -216,11 +212,13 @@ struct peer {
 	/* Stuff we have in common. */
 	struct peer_visible_state local, remote;
 
-    /* this is where we will store their revocation preimages*/
-    struct shachain their_preimages;
+	/* this is where we will store their revocation preimages*/
+	struct shachain their_preimages;
 };
 
 void setup_listeners(struct lightningd_state *dstate, unsigned int portnum);
+
+struct peer *find_peer(struct lightningd_state *dstate, const struct pubkey *id);
 
 /* Populates very first peer->{local,remote}.commit->{tx,cstate} */
 bool setup_first_commit(struct peer *peer);
@@ -232,19 +230,44 @@ void remote_changes_pending(struct peer *peer);
 void add_unacked(struct peer_visible_state *which,
 		 const union htlc_staging *stage);
 
-/* Peer has recieved revocation, or problem (if non-NULL). */
-void peer_update_complete(struct peer *peer, const char *problem);
+/* These unacked changes are now acked; add them to acked set. */
+void add_acked_changes(union htlc_staging **acked,
+		       const union htlc_staging *changes);
+
+/* Both sides are committed to these changes they proposed. */
+void peer_both_committed_to(struct peer *peer,
+			    const union htlc_staging *changes, enum channel_side side);
+
+/* Freeing removes from map, too */
+struct htlc *peer_new_htlc(struct peer *peer, 
+			   u64 id,
+			   u64 msatoshis,
+			   const struct sha256 *rhash,
+			   u32 expiry,
+			   const u8 *route,
+			   size_t route_len,
+			   struct htlc *src,
+			   enum channel_side side);
+
+struct htlc *command_htlc_add(struct peer *peer, u64 msatoshis,
+			      unsigned int expiry,
+			      const struct sha256 *rhash,
+			      struct htlc *src,
+			      const u8 *route);
+
+/* Peer has recieved revocation. */
+void peer_update_complete(struct peer *peer);
 
 /* Peer has completed open, or problem (if non-NULL). */
 void peer_open_complete(struct peer *peer, const char *problem);
-
-void peer_add_htlc_expiry(struct peer *peer,
-			  const struct abs_locktime *expiry);
 
 struct bitcoin_tx *peer_create_close_tx(struct peer *peer, u64 fee);
 
 uint64_t commit_tx_fee(const struct bitcoin_tx *commit,
 		       uint64_t anchor_satoshis);
 
-bool resolve_one_htlc(struct peer *peer, u64 id, const struct sha256 *preimage);
+void our_htlc_fulfilled(struct peer *peer, struct htlc *htlc,
+			const struct rval *preimage);
+
+void cleanup_peers(struct lightningd_state *dstate);
 #endif /* LIGHTNING_DAEMON_PEER_H */

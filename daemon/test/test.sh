@@ -9,6 +9,7 @@ scripts/setup.sh
 
 DIR1=/tmp/lightning.$$.1
 DIR2=/tmp/lightning.$$.2
+DIR3=/tmp/lightning.$$.3
 
 REDIR1="$DIR1/output"
 REDIR2="$DIR2/output"
@@ -81,6 +82,7 @@ done
 
 LCLI1="../lightning-cli --lightning-dir=$DIR1"
 LCLI2="../lightning-cli --lightning-dir=$DIR2"
+LCLI3="../lightning-cli --lightning-dir=$DIR3"
 
 if [ -n "$VERBOSE" ]; then
     FGREP="fgrep"
@@ -103,6 +105,19 @@ lcli2()
 	echo $LCLI2 "$@" >&2
     fi
     $LCLI2 "$@"
+}
+
+lcli3()
+{
+    if [ -n "$VERBOSE" ]; then
+	echo $LCLI3 "$@" >&2
+    fi
+    $LCLI3 "$@"
+}
+
+blockheight()
+{
+    $CLI getblockcount
 }
 
 # Usage: <cmd to test>...
@@ -212,9 +227,10 @@ all_ok()
     # Look for valgrind errors.
     if grep ^== $DIR1/errors; then exit 1; fi
     if grep ^== $DIR2/errors; then exit 1; fi
+    if grep ^== $DIR3/errors; then exit 1; fi
     scripts/shutdown.sh
 
-    trap "rm -rf $DIR1 $DIR2" EXIT
+    trap "rm -rf $DIR1 $DIR2 $DIR3" EXIT
     exit 0
 }
 
@@ -223,7 +239,7 @@ if [ -n "$CRASH_ON_FAIL" ]; then
 else
     trap "echo Results in $DIR1 and $DIR2 >&2; cat $DIR1/errors $DIR2/errors >&2" EXIT
 fi
-mkdir $DIR1 $DIR2
+mkdir $DIR1 $DIR2 $DIR3
 
 if [ -n "$MANUALCOMMIT" ]; then
     # Aka. never. 
@@ -235,20 +251,24 @@ fi
 cat > $DIR1/config <<EOF
 log-level=debug
 bitcoind-poll=1s
-min-expiry=900
+deadline-blocks=5
+min-htlc-expiry=6
 bitcoin-datadir=$DATADIR
-locktime=600
+locktime-blocks=6
 commit-time=$COMMIT_TIME
 EOF
 
 cat > $DIR2/config <<EOF
 log-level=debug
 bitcoind-poll=1s
-min-expiry=900
+deadline-blocks=5
+min-htlc-expiry=6
 bitcoin-datadir=$DATADIR
-locktime=600
+locktime-blocks=6
 commit-time=$COMMIT_TIME
 EOF
+
+cp $DIR2/config $DIR3/config
 
 if [ -n "$DIFFERENT_FEES" ]; then
     FEE_RATE2=300000
@@ -270,6 +290,7 @@ if [ -n "$GDB2" ]; then
 else
     $PREFIX ../lightningd --lightning-dir=$DIR2 > $REDIR2 2> $REDIRERR2 &
 fi
+$PREFIX ../lightningd --lightning-dir=$DIR3 > $DIR3/output 2> $DIR3/errors &
 
 if ! check "$LCLI1 getlog 2>/dev/null | $FGREP Hello"; then
     echo Failed to start daemon 1 >&2
@@ -281,10 +302,17 @@ if ! check "$LCLI2 getlog 2>/dev/null | $FGREP Hello"; then
     exit 1
 fi
 
+if ! check "$LCLI3 getlog 2>/dev/null | $FGREP Hello"; then
+    echo Failed to start daemon 3 >&2
+    exit 1
+fi
+
 ID1=`$LCLI1 getlog | sed -n 's/.*"ID: \([0-9a-f]*\)".*/\1/p'`
 ID2=`$LCLI2 getlog | sed -n 's/.*"ID: \([0-9a-f]*\)".*/\1/p'`
+ID3=`$LCLI3 getlog | sed -n 's/.*"ID: \([0-9a-f]*\)".*/\1/p'`
 
 PORT2=`$LCLI2 getlog | sed -n 's/.*on port \([0-9]*\).*/\1/p'`
+PORT3=`$LCLI3 getlog | sed -n 's/.*on port \([0-9]*\).*/\1/p'`
 
 # Make a payment into a P2SH for anchor.
 P2SHADDR=`$LCLI1 newaddr | sed -n 's/{ "address" : "\(.*\)" }/\1/p'`
@@ -353,6 +381,10 @@ $CLI generate 3
 check_peerstate lcli1 STATE_NORMAL
 check_peerstate lcli2 STATE_NORMAL
 
+# We turn off routing failure for the moment.
+lcli1 dev-routefail false
+lcli2 dev-routefail false
+
 if [ -n "$DIFFERENT_FEES" ]; then 
     # This is 100,000 satoshi, so covers fees.
     HTLC_AMOUNT=100000000
@@ -371,13 +403,13 @@ if [ -n "$DIFFERENT_FEES" ]; then
     check_status_single lcli1 $A_AMOUNT1 $A_FEE1 "" $B_AMOUNT $B_FEE "" 
     check_status_single lcli2 $B_AMOUNT $B_FEE "" $(($A_AMOUNT2)) $(($A_FEE2)) ""
 
-    EXPIRY=$(( $(date +%s) + 1000))
+    EXPIRY=$(( $(blockheight) + 10))
     SECRET=1de08917a61cb2b62ed5937d38577f6a7bfe59c176781c6d8128018e8b5ccdfd
     RHASH=`lcli1 dev-rhash $SECRET | sed 's/.*"\([0-9a-f]*\)".*/\1/'`
     lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
     [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
     [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
-    check_status_single lcli2 0 0 "" $(($AMOUNT - $HTLC_AMOUNT - $ONE_HTLCS_FEE2)) $(($ONE_HTLCS_FEE2)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
+    check_status_single lcli2 0 0 "" $(($AMOUNT - $HTLC_AMOUNT - $ONE_HTLCS_FEE2)) $(($ONE_HTLCS_FEE2)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
     lcli2 fulfillhtlc $ID1 $SECRET
     [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
     [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
@@ -412,9 +444,10 @@ check_status $A_AMOUNT $A_FEE "" $B_AMOUNT $B_FEE ""
 # This is 10,000 satoshi, so not dust!
 HTLC_AMOUNT=10000000
 
-EXPIRY=$(( $(date +%s) + 1000))
+EXPIRY=$(( $(blockheight) + 10))
 SECRET=1de08917a61cb2b62ed5937d38577f6a7bfe59c176781c6d8128018e8b5ccdfd
 RHASH=`lcli1 dev-rhash $SECRET | sed 's/.*"\([0-9a-f]*\)".*/\1/'`
+
 lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
 
 if [ -n "$MANUALCOMMIT" ]; then
@@ -437,17 +470,31 @@ if [ -n "$MANUALCOMMIT" ]; then
     A_FEE=$(($A_FEE + $EXTRA_FEE))
 
     # Node 2 has it committed.
-    check_status_single lcli2 $B_AMOUNT $B_FEE "" $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
+    check_status_single lcli2 $B_AMOUNT $B_FEE "" $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
+
+    # There should be no "both committed" here yet
+    if lcli1 getlog debug | $FGREP "Both committed"; then
+	echo "Node1 thinks they are both committed";
+	exit 1
+    fi
+    if lcli2 getlog debug | $FGREP "Both committed"; then
+	echo "Node2 thinks they are both committed";
+	exit 1
+    fi
 
     # Now node2 gives commitment to node1.
     lcli2 commit $ID1
+
+    # After revocation, they should know they're both committed.
+    check lcli1 "getlog debug | $FGREP 'Both committed to ADD of our HTLC'"
+    check lcli2 "getlog debug | $FGREP 'Both committed to ADD of their HTLC'"
 else
     A_AMOUNT=$(($A_AMOUNT - $EXTRA_FEE - $HTLC_AMOUNT))
     A_FEE=$(($A_FEE + $EXTRA_FEE))
 fi
 
 # Both should have committed tx.
-check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
+check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
 
 if [ -n "$STEAL" ]; then
     $LCLI1 dev-signcommit $ID2 >&2
@@ -469,19 +516,18 @@ if [ -n "$DUMP_ONCHAIN" ]; then
     check_peerstate lcli2 STATE_CLOSE_ONCHAIN_THEIR_UNILATERAL
 
     # both still know about htlc
-    check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
+    check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
 
-    # Move bitcoind's time so CSV timeout has expired.
-    $CLI setmocktime $((`date +%s` + 600))
+    # Generate 6 blocks so CSV timeout has expired.
     $CLI generate 6
 
     # Now, lcli1 should spend its own output.
     check_tx_spend lcli1
     check_peerstate lcli1 STATE_CLOSE_ONCHAIN_OUR_UNILATERAL
 
-    # Move bitcoind's time so HTLC has expired.
-    $CLI setmocktime $(($EXPIRY + 1))
-    $CLI generate 6
+    while [ $(blockheight) != $EXPIRY ]; do
+	$CLI generate 1
+    done
 
     # lcli1 should have gotten HTLC back.
     check_tx_spend lcli1
@@ -498,7 +544,22 @@ fi
     
 lcli2 fulfillhtlc $ID1 $SECRET
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
+
+# Without manual commit, this check is racy.
+if [ -n "$MANUALCOMMIT" ]; then
+    if lcli1 getlog debug | $FGREP 'Both committed to FULFILL'; then
+	echo "Node1 thinks they are both committed";
+	exit 1
+    fi
+    if lcli2 getlog debug | $FGREP 'Both committed to FULFILL'; then
+	echo "Node2 thinks they are both committed";
+	exit 1
+    fi
+fi
 [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+
+check lcli1 "getlog debug | $FGREP 'Both committed to FULFILL of our HTLC'"
+check lcli2 "getlog debug | $FGREP 'Both committed to FULFILL of their HTLC'"
 
 # We've transferred the HTLC amount to 2, who now has to pay fees,
 # so no net change for A who saves on fees.
@@ -519,7 +580,7 @@ lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
 # Check channel status
 A_AMOUNT=$(($A_AMOUNT - $EXTRA_FEE - $HTLC_AMOUNT))
 A_FEE=$(($A_FEE + $EXTRA_FEE))
-check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
+check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
 
 lcli2 failhtlc $ID1 $RHASH
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
@@ -539,17 +600,23 @@ lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
 # Check channel status
 A_AMOUNT=$(($A_AMOUNT - $EXTRA_FEE - $HTLC_AMOUNT))
 A_FEE=$(($A_FEE + $EXTRA_FEE))
-check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
+check_status $A_AMOUNT $A_FEE '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
 
 # Make sure node1 accepts the expiry packet.
-MOCKTIME=$(($EXPIRY))
-lcli1 dev-mocktime $MOCKTIME
+while [ $(blockheight) != $EXPIRY ]; do
+    $CLI generate 1
+done
 
 # This should make node2 send it.
-MOCKTIME=$(($MOCKTIME + 31))
-lcli2 dev-mocktime $MOCKTIME
-[ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
-[ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+$CLI generate 1
+
+if [ -n "$MANUALCOMMIT" ]; then
+    # Don't commit until it's noticed the new block
+    check_staged lcli2 remote 1
+
+    lcli2 commit $ID1
+    lcli1 commit $ID2
+fi
 
 # Back to how we were before.
 A_AMOUNT=$(($A_AMOUNT + $EXTRA_FEE + $HTLC_AMOUNT))
@@ -578,13 +645,13 @@ if [ -n "$STEAL" ]; then
 fi
 
 # First, give more money to node2, so it can offer HTLCs.
-EXPIRY=$(($MOCKTIME + 1000))
+EXPIRY=$(( $(blockheight) + 10))
 HTLC_AMOUNT=100000000
 lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
 [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
 
-check_status $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
+check_status $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $B_AMOUNT $B_FEE ""
 
 lcli2 fulfillhtlc $ID1 $SECRET
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
@@ -610,7 +677,7 @@ lcli2 newhtlc $ID1 $HTLC_AMOUNT $EXPIRY $RHASH2
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
 [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
 
-check_status $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $(($B_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($B_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH2'" } '
+check_status $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } ' $(($B_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE)) $(($B_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH2'" } '
 
 if [ -n "$CLOSE_WITH_HTLCS" ]; then
     # Now begin close
@@ -665,7 +732,7 @@ lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH
 # Make sure node1 sends commit (in the background, since it will block!)
 [ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2 &
 # node2 will consider this committed.
-check_status_single lcli2 $(($B_AMOUNT - $EXTRA_FEE/2)) $(($B_FEE + $EXTRA_FEE/2)) "" $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE/2)) $(($A_FEE + $EXTRA_FEE/2)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
+check_status_single lcli2 $(($B_AMOUNT - $EXTRA_FEE/2)) $(($B_FEE + $EXTRA_FEE/2)) "" $(($A_AMOUNT - $HTLC_AMOUNT - $EXTRA_FEE/2)) $(($A_FEE + $EXTRA_FEE/2)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" } '
 
 # Now send another offer, and enable node2 output.
 lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH2
@@ -676,7 +743,7 @@ lcli2 dev-output $ID1 true
 [ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
 
 # Both sides should be committed to htlcs
-check_status $(($A_AMOUNT - $HTLC_AMOUNT*2 - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH'" }, { "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "second" : '$EXPIRY' }, "rhash" : "'$RHASH2'" } ' $(($B_AMOUNT - $EXTRA_FEE)) $(($B_FEE + $EXTRA_FEE)) ""
+check_status $(($A_AMOUNT - $HTLC_AMOUNT*2 - $EXTRA_FEE)) $(($A_FEE + $EXTRA_FEE)) '{ "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH'" }, { "msatoshis" : '$HTLC_AMOUNT', "expiry" : { "block" : '$EXPIRY' }, "rhash" : "'$RHASH2'" } ' $(($B_AMOUNT - $EXTRA_FEE)) $(($B_FEE + $EXTRA_FEE)) ""
 
 # Node2 collects the HTLCs.
 lcli2 fulfillhtlc $ID1 $SECRET
@@ -689,6 +756,82 @@ lcli2 fulfillhtlc $ID1 $SECRET2
 A_AMOUNT=$(($A_AMOUNT - $HTLC_AMOUNT * 2))
 B_AMOUNT=$(($B_AMOUNT + $HTLC_AMOUNT * 2))
 check_status $A_AMOUNT $A_FEE "" $B_AMOUNT $B_FEE ""
+
+# Now, use automatic payment redemption
+lcli1 dev-routefail true
+lcli2 dev-routefail true
+RHASH3=`lcli2 accept-payment $HTLC_AMOUNT | sed 's/.*"\([0-9a-f]*\)".*/\1/'`
+
+lcli1 newhtlc $ID2 $HTLC_AMOUNT $EXPIRY $RHASH3
+[ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+[ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
+
+[ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
+[ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+
+# We transferred amount from A to B.
+A_AMOUNT=$(($A_AMOUNT - $HTLC_AMOUNT))
+B_AMOUNT=$(($B_AMOUNT + $HTLC_AMOUNT))
+check_status $A_AMOUNT $A_FEE "" $B_AMOUNT $B_FEE ""
+
+# Now, failed payment (didn't pay enough)
+RHASH4=`lcli2 accept-payment $HTLC_AMOUNT | sed 's/.*"\([0-9a-f]*\)".*/\1/'`
+
+# Shouldn't have this already.
+if lcli2 getlog | $FGREP 'Short payment for HTLC'; then exit 1; fi
+
+lcli1 newhtlc $ID2 $(($HTLC_AMOUNT - 1)) $EXPIRY $RHASH4
+[ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+[ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
+
+[ ! -n "$MANUALCOMMIT" ] || lcli2 commit $ID1
+[ ! -n "$MANUALCOMMIT" ] || lcli1 commit $ID2
+
+check lcli2 "getlog | $FGREP 'Short payment for HTLC'"
+check_status $A_AMOUNT $A_FEE "" $B_AMOUNT $B_FEE ""
+
+if [ ! -n "$MANUALCOMMIT" ]; then
+    # Test routing to a third node.
+    P2SHADDR2=`$LCLI2 newaddr | sed -n 's/{ "address" : "\(.*\)" }/\1/p'`
+    TXID2=`$CLI sendtoaddress $P2SHADDR2 0.01`
+    TX2=`$CLI getrawtransaction $TXID2`
+    $CLI generate 1
+
+    lcli2 connect localhost $PORT3 $TX2
+    check_tx_spend lcli2
+    $CLI generate 3
+
+    # Make sure it's STATE_NORMAL.
+    check_peerstate lcli3 STATE_NORMAL
+
+    # More than enough to cover commit fees.
+    HTLC_AMOUNT=100000000
+
+    # Tell node 1 about the 2->3 route.
+    lcli1 add-route $ID2 $ID3 546000 10 36 36
+    RHASH5=`lcli3 accept-payment $HTLC_AMOUNT | sed 's/.*"\([0-9a-f]*\)".*/\1/'`
+
+    # Try wrong hash.
+    if lcli1 pay $ID3 $HTLC_AMOUNT $RHASH4; then
+	echo Paid with wrong hash? >&2
+	exit 1
+    fi
+
+    # Try underpaying.
+    if lcli1 pay $ID3 $(($HTLC_AMOUNT-1)) $RHASH5; then
+	echo Paid with too little? >&2
+	exit 1
+    fi
+
+    # Pay correctly.
+    lcli1 pay $ID3 $HTLC_AMOUNT $RHASH5
+
+    # Node 3 should end up with that amount (minus 1/2 tx fee)
+    # Note that it is delayed a little, since node2 fulfils as soon as fulfill
+    # starts.
+    check lcli3 "getpeers | $FGREP \"\\\"our_amount\\\" : $(($HTLC_AMOUNT - $NO_HTLCS_FEE / 2))\""
+    lcli3 close $ID2
+fi
 
 lcli1 close $ID2
 

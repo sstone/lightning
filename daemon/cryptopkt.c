@@ -13,6 +13,7 @@
 #include <ccan/endian/endian.h>
 #include <ccan/mem/mem.h>
 #include <ccan/short_types/short_types.h>
+#include <ccan/structeq/structeq.h>
 #include <inttypes.h>
 #include <secp256k1.h>
 #include <secp256k1_ecdh.h>
@@ -351,26 +352,36 @@ static struct io_plan *check_proof(struct io_conn *conn, struct peer *peer)
 	struct signature sig;
 	struct io_plan *(*cb)(struct io_conn *, struct peer *);
 	Authenticate *auth;
+	struct pubkey id;
 
 	auth = pkt_unwrap(peer, PKT__PKT_AUTH);
 	if (!auth)
 		return io_close(conn);
 
-	if (!proto_to_signature(auth->session_sig, &sig)) {
+	if (!proto_to_signature(peer->dstate->secpctx, auth->session_sig,
+				&sig)) {
 		log_unusual(peer->log, "Invalid auth signature");
 		return io_close(conn);
 	}
 
-	if (!proto_to_pubkey(peer->dstate->secpctx, auth->node_id, &peer->id)) {
+	if (!proto_to_pubkey(peer->dstate->secpctx, auth->node_id, &id)) {
 		log_unusual(peer->log, "Invalid auth id");
 		return io_close(conn);
 	}
 
+	/* Did we expect a specific ID? */
+	if (!peer->id)
+		peer->id = tal_dup(peer, struct pubkey, &id);
+	else if (!structeq(&id, peer->id)) {
+		log_unusual(peer->log, "Incorrect auth id");
+		return io_close(conn);
+	}
+	
 	/* Signature covers *our* session key. */
 	sha256_double(&sha,
 		      neg->our_sessionpubkey, sizeof(neg->our_sessionpubkey));
 
-	if (!check_signed_hash(peer->dstate->secpctx, &sha, &sig, &peer->id)) {
+	if (!check_signed_hash(peer->dstate->secpctx, &sha, &sig, peer->id)) {
 		log_unusual(peer->log, "Bad auth signature");
 		return io_close(conn);
 	}
@@ -421,13 +432,14 @@ static Pkt *pkt_wrap(const tal_t *ctx, void *w, Pkt__PktCase pkt_case)
 }
 
 static Pkt *authenticate_pkt(const tal_t *ctx,
+			     secp256k1_context *secpctx,
 			     const struct pubkey *node_id,
 			     const struct signature *sig)
 {
 	Authenticate *auth = tal(ctx, Authenticate);
 	authenticate__init(auth);
-	auth->node_id = pubkey_to_proto(auth, node_id);
-	auth->session_sig = signature_to_proto(auth, sig);
+	auth->node_id = pubkey_to_proto(auth, secpctx, node_id);
+	auth->session_sig = signature_to_proto(auth, secpctx, sig);
 	return pkt_wrap(ctx, auth, PKT__PKT_AUTH);
 }
 
@@ -466,7 +478,8 @@ static struct io_plan *keys_exchanged(struct io_conn *conn, struct peer *peer)
 		     sizeof(neg->their_sessionpubkey), &sig);
 
 	/* FIXME: Free auth afterwards. */
-	auth = authenticate_pkt(peer, &peer->dstate->id, &sig);
+	auth = authenticate_pkt(peer, peer->dstate->secpctx,
+				&peer->dstate->id, &sig);
 	return peer_write_packet(conn, peer, auth, receive_proof);
 }
 
@@ -569,6 +582,7 @@ struct io_plan *peer_crypto_setup(struct io_conn *conn, struct peer *peer,
 
 	gen_sessionkey(peer->dstate->secpctx, neg->seckey, &sessionkey);
 
+	outputlen = sizeof(neg->our_sessionpubkey);
 	secp256k1_ec_pubkey_serialize(peer->dstate->secpctx,
 				      neg->our_sessionpubkey, &outputlen,
 				      &sessionkey,

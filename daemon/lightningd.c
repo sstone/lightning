@@ -7,6 +7,7 @@
 #include "log.h"
 #include "opt_time.h"
 #include "peer.h"
+#include "routing.h"
 #include "secrets.h"
 #include "timeout.h"
 #include <ccan/container_of/container_of.h>
@@ -58,6 +59,22 @@ static char *opt_set_u32(const char *arg, u32 *u)
 	return NULL;
 }
 
+static char *opt_set_s32(const char *arg, s32 *u)
+{
+	char *endp;
+	long l;
+
+	/* This is how the manpage says to do it.  Yech. */
+	errno = 0;
+	l = strtol(arg, &endp, 0);
+	if (*endp || !arg[0])
+		return tal_fmt(NULL, "'%s' is not a number", arg);
+	*u = l;
+	if (errno || *u != l)
+		return tal_fmt(NULL, "'%s' is out of range", arg);
+	return NULL;
+}
+
 static void opt_show_u64(char buf[OPT_SHOW_LEN], const u64 *u)
 {
 	snprintf(buf, OPT_SHOW_LEN, "%"PRIu64, *u);
@@ -68,13 +85,18 @@ static void opt_show_u32(char buf[OPT_SHOW_LEN], const u32 *u)
 	snprintf(buf, OPT_SHOW_LEN, "%"PRIu32, *u);
 }
 
+static void opt_show_s32(char buf[OPT_SHOW_LEN], const s32 *u)
+{
+	snprintf(buf, OPT_SHOW_LEN, "%"PRIi32, *u);
+}
+
 static void config_register_opts(struct lightningd_state *dstate)
 {
-	opt_register_arg("--locktime", opt_set_u32, opt_show_u32,
-			 &dstate->config.rel_locktime,
-			 "Seconds before peer can unilaterally spend funds");
-	opt_register_arg("--max-locktime", opt_set_u32, opt_show_u32,
-			 &dstate->config.rel_locktime_max,
+	opt_register_arg("--locktime-blocks", opt_set_u32, opt_show_u32,
+			 &dstate->config.locktime_blocks,
+			 "Blocks before peer can unilaterally spend funds");
+	opt_register_arg("--max-locktime-blocks", opt_set_u32, opt_show_u32,
+			 &dstate->config.locktime_max,
 			 "Maximum seconds peer can lock up our funds");
 	opt_register_arg("--anchor-confirms", opt_set_u32, opt_show_u32,
 			 &dstate->config.anchor_confirms,
@@ -94,34 +116,40 @@ static void config_register_opts(struct lightningd_state *dstate)
 	opt_register_arg("--closing-fee-rate", opt_set_u64, opt_show_u64,
 			 &dstate->config.closing_fee_rate,
 			 "Satoshis to use for mutual close transaction fee (per kb)");
-	opt_register_arg("--min-expiry", opt_set_u32, opt_show_u32,
-			 &dstate->config.min_expiry,
-			 "Minimum number of seconds to accept an HTLC before expiry");
-	opt_register_arg("--max-expiry", opt_set_u32, opt_show_u32,
-			 &dstate->config.max_expiry,
-			 "Maximum number of seconds to accept an HTLC before expiry");
+	opt_register_arg("--min-htlc-expiry", opt_set_u32, opt_show_u32,
+			 &dstate->config.min_htlc_expiry,
+			 "Minimum number of blocks to accept an HTLC before expiry");
+	opt_register_arg("--max-htlc-expiry", opt_set_u32, opt_show_u32,
+			 &dstate->config.max_htlc_expiry,
+			 "Maximum number of blocks to accept an HTLC before expiry");
+	opt_register_arg("--deadline-blocks", opt_set_u32, opt_show_u32,
+			 &dstate->config.deadline_blocks,
+			 "Number of blocks before HTLC timeout before we drop connection");
 	opt_register_arg("--bitcoind-poll", opt_set_time, opt_show_time,
 			 &dstate->config.poll_time,
 			 "Time between polling for new transactions");
 	opt_register_arg("--commit-time", opt_set_time, opt_show_time,
 			 &dstate->config.commit_time,
 			 "Time after changes before sending out COMMIT");
-}
+	opt_register_arg("--fee-base", opt_set_u32, opt_show_u32,
+			 &dstate->config.fee_base,
+			 "Millisatoshi minimum to charge for HTLC");
+	opt_register_arg("--fee-per-satoshi", opt_set_s32, opt_show_s32,
+			 &dstate->config.fee_per_satoshi,
+			 "Microsatoshi fee for every satoshi in HTLC");
 
-#define MINUTES 60
-#define HOURS (60 * MINUTES)
-#define DAYS (24 * HOURS)
+}
 
 static void default_config(struct config *config)
 {
 	/* aka. "Dude, where's my coins?" */
 	config->testnet = true;
 
-	/* One day to catch cheating attempts. */
-	config->rel_locktime = 1 * DAYS;
+	/* ~one day to catch cheating attempts. */
+	config->locktime_blocks = 6 * 24;
 
 	/* They can have up to 3 days. */
-	config->rel_locktime_max = 2 * DAYS;
+	config->locktime_max = 3 * 6 * 24;
 
 	/* We're fairly trusting, under normal circumstances. */
 	config->anchor_confirms = 3;
@@ -152,14 +180,23 @@ static void default_config(struct config *config)
 	config->closing_fee_rate = 20000;
 
 	/* Don't bother me unless I have 6 hours to collect. */
-	config->min_expiry = 6 * HOURS;
+	config->min_htlc_expiry = 6 * 6;
 	/* Don't lock up channel for more than 5 days. */
-	config->max_expiry = 5 * DAYS;
+	config->max_htlc_expiry = 5 * 6 * 24;
 
+	/* If we're closing on HTLC expiry, and you're unresponsive, we abort. */
+	config->deadline_blocks = 10;
+
+	/* How often to bother bitcoind. */
 	config->poll_time = time_from_sec(30);
 
 	/* Send commit 10msec after receiving; almost immediately. */
 	config->commit_time = time_from_msec(10);
+
+	/* Discourage dust payments */
+	config->fee_base = 546000;
+	/* Take 0.001% */
+	config->fee_per_satoshi = 10;
 }
 
 static void check_config(struct lightningd_state *dstate)
@@ -187,6 +224,16 @@ static void check_config(struct lightningd_state *dstate)
 		log_unusual(dstate->base_log,
 			    "Warning: forever-confirms of %u is less than 100!",
 			    dstate->config.forever_confirms);
+
+	/* BOLT #2:
+	 *
+	 * a node MUST estimate the deadline for successful redemption
+	 * for each HTLC it offers.  A node MUST NOT offer a HTLC
+	 * after this deadline */
+	if (dstate->config.deadline_blocks >= dstate->config.min_htlc_expiry)
+		fatal("Deadline %u can't be more than minimum expiry %u",
+		      dstate->config.deadline_blocks,
+		      dstate->config.min_htlc_expiry);
 }
 
 static struct lightningd_state *lightningd_state(void)
@@ -206,7 +253,10 @@ static struct lightningd_state *lightningd_state(void)
 	default_config(&dstate->config);
 	list_head_init(&dstate->bitcoin_req);
 	list_head_init(&dstate->wallet);
+	list_head_init(&dstate->payments);
+	dstate->dev_never_routefail = false;
 	dstate->bitcoin_req_running = false;
+	dstate->nodes = empty_node_map(dstate);
 	return dstate;
 }
 
@@ -294,7 +344,8 @@ int main(int argc, char *argv[])
 
 	/* Set up node ID and private key. */
 	secrets_init(dstate);
-
+	new_node(dstate, &dstate->id);
+	
 	/* Initialize block topology. */
 	setup_topology(dstate);
 
@@ -311,12 +362,10 @@ int main(int argc, char *argv[])
 		if (v == dstate)
 			break;
 
-		/* We use it on a peer when it needs freeing (may be
-		 * NULL if we only broke out due to timer). */
-		tal_free(v);
-
 		if (expired)
 			timer_expired(dstate, expired);
+		else
+			cleanup_peers(dstate);
 	}
 
 	tal_free(dstate);

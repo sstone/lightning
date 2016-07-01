@@ -49,6 +49,7 @@ struct json_command {
 	const char *help;
 };
 
+struct json_result *null_response(const tal_t *ctx);
 void command_success(struct command *cmd, struct json_result *response);
 void PRINTF_FMT(2, 3) command_fail(struct command *cmd, const char *fmt, ...);
 
@@ -68,4 +69,8 @@ extern const struct json_command newaddr_command;
 extern const struct json_command disconnect_command;
 extern const struct json_command signcommit_command;
 extern const struct json_command output_command;
+extern const struct json_command accept_payment_command;
+extern const struct json_command add_route_command;
+extern const struct json_command routefail_command;
+extern const struct json_command pay_command;
 #endif /* LIGHTNING_DAEMON_JSONRPC_H */

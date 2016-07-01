@@ -1,6 +1,14 @@
+#include "bitcoin/locktime.h"
+#include "bitcoin/pubkey.h"
+#include "bitcoin/tx.h"
 #include "controlled_time.h"
+#include "htlc.h"
+#include "lightningd.h"
 #include "log.h"
+#include "peer.h"
+#include "protobuf_convert.h"
 #include "pseudorand.h"
+#include "utils.h"
 #include <ccan/array_size/array_size.h>
 #include <ccan/list/list.h>
 #include <ccan/opt/opt.h>
@@ -10,6 +18,7 @@
 #include <ccan/time/time.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -28,6 +37,7 @@ struct log_entry {
 struct log_record {
 	size_t mem_used;
 	size_t max_mem;
+	struct lightningd_state *dstate;
 	void (*print)(const char *prefix,
 		      enum log_level level,
 		      bool continued,
@@ -91,16 +101,17 @@ static size_t prune_log(struct log_record *log)
 	return deleted;
 }
 
-struct log_record *new_log_record(const tal_t *ctx,
+struct log_record *new_log_record(struct lightningd_state *dstate,
 				  size_t max_mem,
 				  enum log_level printlevel)
 {
-	struct log_record *lr = tal(ctx, struct log_record);
+	struct log_record *lr = tal(dstate, struct log_record);
 
 	/* Give a reasonable size for memory limit! */
 	assert(max_mem > sizeof(struct log) * 2);
 	lr->mem_used = 0;
 	lr->max_mem = max_mem;
+	lr->dstate = dstate;
 	lr->print = log_default_print;
 	lr->print_level = printlevel;
 	lr->init_time = time_now();
@@ -263,11 +274,88 @@ void log_add(struct log *log, const char *fmt, ...)
 	va_end(ap);
 }
 
-void log_add_hex(struct log *log, const void *data, size_t len)
+#define to_string(ctx, lr, structtype, ptr)				\
+	to_string_((ctx), lr, stringify(structtype),			\
+		   ((void)sizeof((ptr) == (structtype *)NULL),		\
+		    ((union loggable_structs)((const structtype *)ptr))))
+
+static char *to_string_(const tal_t *ctx,
+			struct log_record *lr,
+			const char *structname,
+			union loggable_structs u)
 {
-	char hex[hex_str_size(len)];
-	hex_encode(data, len, hex, hex_str_size(len));
-	log_add(log, "%s", hex);
+	char *s = NULL;
+
+	/* GCC checks we're one of these, so we should be. */
+	if (streq(structname, "struct pubkey"))
+		s = pubkey_to_hexstr(ctx, lr->dstate->secpctx, u.pubkey);
+	else if (streq(structname, "struct sha256_double"))
+		s = tal_hexstr(ctx, u.sha256_double, sizeof(*u.sha256_double));
+	else if (streq(structname, "struct sha256"))
+		s = tal_hexstr(ctx, u.sha256, sizeof(*u.sha256));
+	else if (streq(structname, "struct rel_locktime")) {
+		if (rel_locktime_is_seconds(u.rel_locktime))
+			s = tal_fmt(ctx, "+%usec",
+				    rel_locktime_to_seconds(u.rel_locktime));
+		else
+			s = tal_fmt(ctx, "+%ublocks",
+				    rel_locktime_to_blocks(u.rel_locktime));
+	} else if (streq(structname, "struct abs_locktime")) {
+		if (abs_locktime_is_seconds(u.abs_locktime))
+			s = tal_fmt(ctx, "%usec",
+				    abs_locktime_to_seconds(u.abs_locktime));
+		else
+			s = tal_fmt(ctx, "%ublocks",
+				    abs_locktime_to_blocks(u.abs_locktime));
+	} else if (streq(structname, "struct bitcoin_tx")) {
+		u8 *lin = linearize_tx(ctx, u.bitcoin_tx);
+		s = tal_hexstr(ctx, lin, tal_count(lin));
+	} else if (streq(structname, "struct htlc")) {
+		const struct htlc *h = u.htlc;
+		s = tal_fmt(ctx, "{ id=%"PRIu64
+			    " msatoshis=%"PRIu64
+			    " expiry=%s"
+			    " rhash=%s"
+			    " rval=%s"
+			    " src=%s }",
+			    h->id, h->msatoshis,
+			    to_string(ctx, lr, struct abs_locktime, &h->expiry),
+			    to_string(ctx, lr, struct sha256, &h->rhash),
+			    h->r ? tal_hexstr(ctx, h->r, sizeof(*h->r))
+			    : "UNKNOWN",
+			    h->src ? to_string(ctx, lr, struct pubkey,
+					       h->src->peer->id)
+			    : "local");
+	}
+
+	return s;
+}
+
+void log_struct_(struct log *log, int level,
+		 const char *structname,
+		 const char *fmt, ...)
+{
+	tal_t *ctx = tal(log, char);
+	char *s;
+	union loggable_structs u;
+	va_list ap;
+
+	/* Macro wrappers ensure we only have one arg. */
+	va_start(ap, fmt);
+	u.charp_ = va_arg(ap, const char *);
+	va_end(ap);
+
+	/* GCC checks we're one of these, so we should be. */
+	s = to_string_(ctx, log->lr, structname, u);
+	if (!s)
+		fatal("Logging unknown type %s", structname);
+
+	if (level == -1)
+		log_add(log, fmt, s);
+	else
+		log_(log, level, fmt, s);
+
+	tal_free(ctx);
 }
 
 void log_each_line_(const struct log_record *lr,

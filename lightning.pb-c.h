@@ -16,6 +16,7 @@ PROTOBUF_C__BEGIN_DECLS
 
 
 typedef struct _Sha256Hash Sha256Hash;
+typedef struct _Rval Rval;
 typedef struct _Signature Signature;
 typedef struct _Locktime Locktime;
 typedef struct _BitcoinPubkey BitcoinPubkey;
@@ -25,6 +26,8 @@ typedef struct _OpenChannel OpenChannel;
 typedef struct _OpenAnchor OpenAnchor;
 typedef struct _OpenCommitSig OpenCommitSig;
 typedef struct _OpenComplete OpenComplete;
+typedef struct _RouteStep RouteStep;
+typedef struct _Route Route;
 typedef struct _Routing Routing;
 typedef struct _UpdateAddHtlc UpdateAddHtlc;
 typedef struct _UpdateFulfillHtlc UpdateFulfillHtlc;
@@ -67,6 +70,19 @@ struct  _Sha256Hash
 };
 #define SHA256_HASH__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&sha256_hash__descriptor) \
+    , 0, 0, 0, 0 }
+
+
+struct  _Rval
+{
+  ProtobufCMessage base;
+  uint64_t a;
+  uint64_t b;
+  uint64_t c;
+  uint64_t d;
+};
+#define RVAL__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&rval__descriptor) \
     , 0, 0, 0, 0 }
 
 
@@ -268,9 +284,50 @@ struct  _OpenComplete
     , NULL }
 
 
-/*
- * FIXME: Routing information.
- */
+typedef enum {
+  ROUTE_STEP__NEXT__NOT_SET = 0,
+  ROUTE_STEP__NEXT_END = 1,
+  ROUTE_STEP__NEXT_BITCOIN = 2,
+} RouteStep__NextCase;
+
+struct  _RouteStep
+{
+  ProtobufCMessage base;
+  /*
+   * How much to forward (difference is fee)
+   */
+  uint32_t amount;
+  RouteStep__NextCase next_case;
+  union {
+    /*
+     * Actually, this is the last one
+     */
+    protobuf_c_boolean end;
+    /*
+     * Next lightning node.
+     */
+    /*
+     * Other realms go here...
+     */
+    BitcoinPubkey *bitcoin;
+  };
+};
+#define ROUTE_STEP__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&route_step__descriptor) \
+    , 0, ROUTE_STEP__NEXT__NOT_SET, {} }
+
+
+struct  _Route
+{
+  ProtobufCMessage base;
+  size_t n_steps;
+  RouteStep **steps;
+};
+#define ROUTE__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&route__descriptor) \
+    , 0,NULL }
+
+
 struct  _Routing
 {
   ProtobufCMessage base;
@@ -326,7 +383,7 @@ struct  _UpdateFulfillHtlc
   /*
    * HTLC R value.
    */
-  Sha256Hash *r;
+  Rval *r;
 };
 #define UPDATE_FULFILL_HTLC__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&update_fulfill_htlc__descriptor) \
@@ -524,6 +581,25 @@ Sha256Hash *
 void   sha256_hash__free_unpacked
                      (Sha256Hash *message,
                       ProtobufCAllocator *allocator);
+/* Rval methods */
+void   rval__init
+                     (Rval         *message);
+size_t rval__get_packed_size
+                     (const Rval   *message);
+size_t rval__pack
+                     (const Rval   *message,
+                      uint8_t             *out);
+size_t rval__pack_to_buffer
+                     (const Rval   *message,
+                      ProtobufCBuffer     *buffer);
+Rval *
+       rval__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   rval__free_unpacked
+                     (Rval *message,
+                      ProtobufCAllocator *allocator);
 /* Signature methods */
 void   signature__init
                      (Signature         *message);
@@ -694,6 +770,44 @@ OpenComplete *
                       const uint8_t       *data);
 void   open_complete__free_unpacked
                      (OpenComplete *message,
+                      ProtobufCAllocator *allocator);
+/* RouteStep methods */
+void   route_step__init
+                     (RouteStep         *message);
+size_t route_step__get_packed_size
+                     (const RouteStep   *message);
+size_t route_step__pack
+                     (const RouteStep   *message,
+                      uint8_t             *out);
+size_t route_step__pack_to_buffer
+                     (const RouteStep   *message,
+                      ProtobufCBuffer     *buffer);
+RouteStep *
+       route_step__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   route_step__free_unpacked
+                     (RouteStep *message,
+                      ProtobufCAllocator *allocator);
+/* Route methods */
+void   route__init
+                     (Route         *message);
+size_t route__get_packed_size
+                     (const Route   *message);
+size_t route__pack
+                     (const Route   *message,
+                      uint8_t             *out);
+size_t route__pack_to_buffer
+                     (const Route   *message,
+                      ProtobufCBuffer     *buffer);
+Route *
+       route__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   route__free_unpacked
+                     (Route *message,
                       ProtobufCAllocator *allocator);
 /* Routing methods */
 void   routing__init
@@ -909,6 +1023,9 @@ void   pkt__free_unpacked
 typedef void (*Sha256Hash_Closure)
                  (const Sha256Hash *message,
                   void *closure_data);
+typedef void (*Rval_Closure)
+                 (const Rval *message,
+                  void *closure_data);
 typedef void (*Signature_Closure)
                  (const Signature *message,
                   void *closure_data);
@@ -935,6 +1052,12 @@ typedef void (*OpenCommitSig_Closure)
                   void *closure_data);
 typedef void (*OpenComplete_Closure)
                  (const OpenComplete *message,
+                  void *closure_data);
+typedef void (*RouteStep_Closure)
+                 (const RouteStep *message,
+                  void *closure_data);
+typedef void (*Route_Closure)
+                 (const Route *message,
                   void *closure_data);
 typedef void (*Routing_Closure)
                  (const Routing *message,
@@ -976,6 +1099,7 @@ typedef void (*Pkt_Closure)
 /* --- descriptors --- */
 
 extern const ProtobufCMessageDescriptor sha256_hash__descriptor;
+extern const ProtobufCMessageDescriptor rval__descriptor;
 extern const ProtobufCMessageDescriptor signature__descriptor;
 extern const ProtobufCMessageDescriptor locktime__descriptor;
 extern const ProtobufCMessageDescriptor bitcoin_pubkey__descriptor;
@@ -986,6 +1110,8 @@ extern const ProtobufCEnumDescriptor    open_channel__anchor_offer__descriptor;
 extern const ProtobufCMessageDescriptor open_anchor__descriptor;
 extern const ProtobufCMessageDescriptor open_commit_sig__descriptor;
 extern const ProtobufCMessageDescriptor open_complete__descriptor;
+extern const ProtobufCMessageDescriptor route_step__descriptor;
+extern const ProtobufCMessageDescriptor route__descriptor;
 extern const ProtobufCMessageDescriptor routing__descriptor;
 extern const ProtobufCMessageDescriptor update_add_htlc__descriptor;
 extern const ProtobufCMessageDescriptor update_fulfill_htlc__descriptor;

@@ -1,12 +1,12 @@
 #define _GNU_SOURCE 1
-#include "secp256k1.h"
-#include "secp256k1_ecdh.h"
 #include "onion_key.h"
 #include "version.h"
 #include <time.h>
 #include <ccan/str/hex/hex.h>
 #include <ccan/opt/opt.h>
 #include <assert.h>
+#include <secp256k1.h>
+#include <secp256k1_ecdh.h>
 #include <string.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -35,7 +35,7 @@ static void gen_keys(secp256k1_context *ctx,
 		     struct seckey *seckey, struct compressed_pubkey *pubkey)
 {
 	secp256k1_pubkey pkey;
-	size_t len;
+	size_t len = sizeof(pubkey->u8);
 
 	random_key(ctx, seckey, &pkey);
 
