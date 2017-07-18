@@ -72,6 +72,7 @@ static void broadcast_node_announcement(struct lightningd_state *dstate)
 
 	/* Avoid triggering memcheck */
 	memset(&signature, 0, sizeof(signature));
+    strcpy((char*)alias, "lightning-c");
 
 	address = write_ip(tmpctx, dstate->external_ip, dstate->portnum);
 	serialized = towire_node_announcement(tmpctx, &signature,

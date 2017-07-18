@@ -987,7 +987,8 @@ static u8 *create_node_announcement(const tal_t *ctx, struct lightningd *ld,
 		towire_ipaddr(&addresses, &ld->dstate.config.ipaddr);
 	}
 	memset(alias, 0, sizeof(alias));
-	announcement =
+    strcpy((char*)alias, "lightning-c");
+    announcement =
 	    towire_node_announcement(ctx, sig, timestamp, &ld->dstate.id, rgb,
 				     alias, features, addresses);
 	return announcement;
