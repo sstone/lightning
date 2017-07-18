@@ -1841,7 +1841,7 @@ static void channel_config(struct lightningd *ld,
 	 * the Bitcoin network.
 	 */
 	ours->dust_limit_satoshis = 546;
-	ours->max_htlc_value_in_flight_msat = UINT64_MAX / 2; // FD UINT64_MAX;
+    ours->max_htlc_value_in_flight_msat = UINT64_MAX;
 
 	/* Don't care */
 	ours->htlc_minimum_msat = 0;
